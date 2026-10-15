@@ -1,0 +1,17 @@
+data/raw/
+data/processed/
+data/processed_slice/
+results/tables_slice/
+results/spark_slice/
+results_slice/
+logs/
+.venv/
+scala/target/
+scala/project/target/
+scala/project/project/
+__pycache__/
+.pytest_cache/
+spark-warehouse/
+metastore_db/
+derby.log
+*.crc
