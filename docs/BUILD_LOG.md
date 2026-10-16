@@ -41,3 +41,36 @@ Exit check results:
 Notes:
 
 - The city API returned HTTP 500 and 503 several times. The retry rules recovered each time. No month needed a manual restart.
+
+## 2026-10-16, Phase 2: Scala parsing, cleaning, and profile
+
+Commits:
+
+- feat(scala): add constants, args, config, and CSV writer
+- refactor(scala): shorten a long line in the smoke job
+- feat(scala): add line parser and cleaning rules
+- test(scala): add unit tests for parser, cleaning, windows, and CSV
+- feat(scala): add profile job with RDD operations
+- docs(results): add profile tables
+
+Exit check results:
+
+- cd scala && sbt -batch test passed with 25 tests.
+- ProfileJob on the slice ended with reconcile: ok and PROFILE OK.
+- ProfileJob on the full file read 3655043 lines and ended with reconcile: ok and PROFILE OK.
+- The monthly counts show 12 months, 2025-01 to 2025-12. Source: results/tables/profile_monthly_counts.csv.
+- The quantiles rise from 0.2757 days (median) to 207.86 days (0.99). The maximum is 640.48 days. Source: results/tables/profile_duration_quantiles.csv.
+- The histogram counts add up to 3596374 clean rows. Source: results/tables/profile_duration_hist.csv.
+- The open_no_closed_date drops are 54649 rows, which is 1.495 percent of the data rows. verify_download.py printed 1.4952 percent.
+
+Row counts (source: results/tables/profile_row_counts.csv):
+
+- Clean rows: 3596374.
+- Drops: open_no_closed_date 54649, status_not_closed 3942, closed_before_created 77.
+- Rejects: none.
+- Windows: history 1734203, train 905441, test 956730.
+
+Problems fixed:
+
+- The first full run printed RejectedExecutionException traces after PROFILE OK. The cause was an unpersist call that did not wait before the context stopped. The job now calls unpersist with blocking = true. The tables did not change.
+- The sbt package step prints a warning that it found multiple main classes. This is an sbt message, not a compiler warning. The jar and the job are not affected.

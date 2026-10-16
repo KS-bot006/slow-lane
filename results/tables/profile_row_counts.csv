@@ -1,0 +1,11 @@
+kind,name,rows
+info,partitions,16
+lines,lines_read,3655043
+lines,header_lines,1
+drop,closed_before_created,77
+drop,open_no_closed_date,54649
+drop,status_not_closed,3942
+clean,clean_rows,3596374
+window,history,1734203
+window,test,956730
+window,train,905441
