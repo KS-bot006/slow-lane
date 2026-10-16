@@ -1,0 +1,7 @@
+variant,run,seconds
+no_cache,1,2.180259818
+no_cache,2,2.109517148
+no_cache,3,2.109871652
+cache,1,7.521371612
+cache,2,0.128122012
+cache,3,0.084873714

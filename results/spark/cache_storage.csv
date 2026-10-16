@@ -1,0 +1,2 @@
+rdd_id,name,storage_level,cached_partitions,total_partitions,memory_bytes,disk_bytes
+16,MapPartitionsRDD,Disk Memory Deserialized 1x Replicated,16,16,1958247816,41009876

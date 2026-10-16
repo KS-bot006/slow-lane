@@ -150,3 +150,33 @@ Problems fixed:
 
 - The first version of FeatureJob had 10 lines of more than 100 characters. The job was written again with shorter lines before the first run.
 - A check of the Parquet schema with pandas failed because the project does not install pyarrow. The check used PySpark instead.
+
+## 2026-10-16, Phase 5: Scala Spark concepts
+
+Commits:
+
+- feat(scala): add concepts job for partitions, lineage, cache, and recovery
+- docs(results): add Spark concepts outputs and explanation
+
+Exit check results:
+
+- ConceptsJob ended with CONCEPTS OK on the slice and on the full file.
+- partitions.csv has 34 rows. The three RDDs have 16, 16, and 2 partitions, and 16 + 16 + 2 = 34.
+- lineage.txt contains the words ShuffledRDD and ShuffleDependency.
+- cache_timing.csv has 6 rows. cache_storage.csv shows the cached RDD with 16 of 16 partitions.
+- fault_tolerance.csv shows equal = true for the count and for the sum of the days.
+
+Numbers from the full run (source: results/spark/):
+
+- No cache: 2.180, 2.110, and 2.110 seconds. Cache: 7.521, 0.128, and 0.085 seconds. Source: cache_timing.csv.
+- The first cached run is slower than the uncached runs, because it fills the cache.
+- The recompute after unpersist takes 2.999 seconds. Source: fault_tolerance.csv.
+- The cache holds 1958247816 bytes in memory and 41009876 bytes on disk. Source: cache_storage.csv.
+
+Screenshots (human task, done): results/spark/ui/dag_job.png, stages.png, and storage.png. The file storage_rdd.png shows the partitions of the cached RDD.
+
+Problems fixed:
+
+- The first full run stopped when the computer shut down during the hold. The tables fault_tolerance.csv and spark_context.csv were not written. The job ran again, and the tables and screenshots come from the second run.
+- The first dag_job.png showed the Jobs list and not the DAG of the job with the shuffle. The human saved the screenshot again from the page of job 9.
+- The check is a simulation. A local run has no executor that can fail. This is stated in docs/spark_concepts.md.

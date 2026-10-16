@@ -1,0 +1,2 @@
+master,default_parallelism,cores
+local[*],22,22

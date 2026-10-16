@@ -1,0 +1,35 @@
+== clean (Pipeline.cleanRows) ==
+(16) MapPartitionsRDD[16] at flatMap at Pipeline.scala:57 []
+ |   MapPartitionsRDD[15] at map at Pipeline.scala:56 []
+ |   MapPartitionsRDD[14] at flatMap at Pipeline.scala:55 []
+ |   MapPartitionsRDD[13] at map at Pipeline.scala:54 []
+ |   MapPartitionsRDD[12] at filter at Pipeline.scala:53 []
+ |   file:/workspace/data/raw/311_2025.tsv MapPartitionsRDD[11] at textFile at Pipeline.scala:48 []
+ |   file:/workspace/data/raw/311_2025.tsv HadoopRDD[10] at textFile at Pipeline.scala:48 []
+Dependencies:
+  MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+    MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+      MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+        MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+          MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+            MapPartitionsRDD <- HadoopRDD via OneToOneDependency (narrow)
+
+== byType (map and reduceByKey on complaint type and days) ==
+(16) ShuffledRDD[18] at reduceByKey at ConceptsJob.scala:73 []
+ +-(16) MapPartitionsRDD[17] at map at ConceptsJob.scala:72 []
+    |   MapPartitionsRDD[16] at flatMap at Pipeline.scala:57 []
+    |   MapPartitionsRDD[15] at map at Pipeline.scala:56 []
+    |   MapPartitionsRDD[14] at flatMap at Pipeline.scala:55 []
+    |   MapPartitionsRDD[13] at map at Pipeline.scala:54 []
+    |   MapPartitionsRDD[12] at filter at Pipeline.scala:53 []
+    |   file:/workspace/data/raw/311_2025.tsv MapPartitionsRDD[11] at textFile at Pipeline.scala:48 []
+    |   file:/workspace/data/raw/311_2025.tsv HadoopRDD[10] at textFile at Pipeline.scala:48 []
+Dependencies:
+  ShuffledRDD <- MapPartitionsRDD via ShuffleDependency (shuffle)
+    MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+      MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+        MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+          MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+            MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+              MapPartitionsRDD <- MapPartitionsRDD via OneToOneDependency (narrow)
+                MapPartitionsRDD <- HadoopRDD via OneToOneDependency (narrow)
