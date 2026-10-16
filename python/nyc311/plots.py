@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import math
 import re
@@ -15,12 +16,9 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
-from matplotlib.patches import Patch  # noqa: E402
-from matplotlib.ticker import FuncFormatter, PercentFormatter  # noqa: E402
+from matplotlib.ticker import PercentFormatter  # noqa: E402
 
 from nyc311.config import read_properties  # noqa: E402
-
-LOGGER = logging.getLogger(__name__)
 
 DEFAULT_RESULTS = "results"
 DEFAULT_PROCESSED = "data/processed"
@@ -29,16 +27,16 @@ DPI = 200
 FONT_SIZE = 11
 TITLE_SIZE = 13
 TITLE_WIDTH = 82
-FOOTER_WIDTH = 108
 
 BLUE, ORANGE, GREEN = "#0072B2", "#E69F00", "#009E73"
-VERMILLION, PURPLE, SKY, BLACK = "#D55E00", "#CC79A7", "#56B4E9", "#000000"
-GRAY, LIGHT_GRAY = "#8C8C8C", "#D9D9D9"
+VERMILLION, BLACK = "#D55E00", "#000000"
+GRAY = "#8C8C8C"
 
 RANKING_XLABEL = "Share of requests slower than N days (%), with 95% interval"
 SHORT_HOURS = 16
 LONG_HOURS = 1024
 TICK_HOURS = (6, 24, 72, 168, 720, 4380)
+INSIDE_LABEL_SHARE = 0.1
 TOP_TYPES = 15
 HEATMAP_TYPES = 12
 BOROUGHS = ["BRONX", "BROOKLYN", "MANHATTAN", "QUEENS", "STATEN ISLAND"]
@@ -97,15 +95,14 @@ def new_figure(rows: int = 1, columns: int = 1, **kwargs):
 
 def save_figure(fig, title: str, source: str, n_days: int, path: Path) -> Path:
     """Add the title and the footer, then save the figure as a PNG file."""
-    footer = (
-        f"Source: NYC 311 requests created in 2025 ({source}). "
-        f"Slow means more than {n_days} days to close."
-    )
+    lines = [
+        f"Source: NYC 311 requests created in 2025 ({source}).",
+        f"Slow means more than {n_days} days to close.",
+    ]
     fig.suptitle(
         textwrap.fill(title, TITLE_WIDTH), x=0.01, ha="left", fontsize=TITLE_SIZE,
         fontweight="bold",
     )
-    lines = textwrap.wrap(footer, FOOTER_WIDTH)
     fig.text(0.01, 0.012, "\n".join(lines), ha="left", fontsize=FONT_SIZE,
              color="#444444")
     fig.tight_layout(rect=(0, 0.03 * len(lines) + 0.015, 1, 0.9))
@@ -369,6 +366,242 @@ def plot_time_patterns(
     return save_figure(fig, title_time_patterns(hours, days), source, n_days, path)
 
 
+# Figure 6: precision, recall, and F1 of the five models.
+
+def title_model_comparison(models: pd.DataFrame) -> str:
+    """Build the title of figure 6 from the F1 of the models."""
+    f1 = models.set_index("model")["f1"]
+    best = f1.idxmax()
+    name = MODEL_LABELS[best].replace("\n", " ")
+    return (
+        f"{name} has the highest F1 ({f1[best]:.3f}). The Random Forest scores "
+        f"{f1['random_forest']:.3f} and the history rule {f1['history_rule']:.3f}"
+    )
+
+
+def plot_model_comparison(models: pd.DataFrame, n_days: int, path: Path) -> Path:
+    """Draw figure 6: grouped bars of recall, precision, and F1 for each model."""
+    fig, axis = new_figure()
+    width = 0.26
+    series = (("recall", "Recall", ORANGE), ("precision", "Precision", GREEN),
+              ("f1", "F1", BLUE))
+    positions = list(range(len(models)))
+    for offset, (column, label, color) in zip((-width, 0, width), series):
+        bars = axis.bar([x + offset for x in positions], models[column], width,
+                        label=label, color=color)
+        for bar, value in zip(bars, models[column]):
+            axis.text(bar.get_x() + bar.get_width() / 2, value + 0.012, f"{value:.2f}",
+                      ha="center", va="bottom")
+    axis.set_xticks(positions)
+    axis.set_xticklabels([MODEL_LABELS[name] for name in models["model"]])
+    axis.set_ylim(0, 1.12)
+    axis.set_ylabel("Score of the slow class (0 to 1)")
+    axis.set_xlabel("Model (test window, decision threshold 0.5)")
+    axis.legend(ncol=3, frameon=False, loc="upper left")
+    title = title_model_comparison(models)
+    return save_figure(fig, title, "metrics_by_model.csv", n_days, path)
+
+
+# Figure 7: precision against recall.
+
+def precision_at_recall(curve: pd.DataFrame, target: float) -> float:
+    """Return the precision at the highest threshold that keeps the target recall."""
+    kept = curve[curve["recall"] >= target]
+    return float(kept.sort_values("threshold").iloc[-1]["precision"])
+
+
+def title_pr_curves(curves: pd.DataFrame, rule: dict) -> str:
+    """Build the title of figure 7."""
+    recall = rule["recall"]
+    by_model = {name: rows for name, rows in curves.groupby("model")}
+    forest = precision_at_recall(by_model["random_forest"], recall)
+    logistic = precision_at_recall(by_model["logistic_regression"], recall)
+    return (
+        f"At the recall of the history rule ({recall:.0%}), precision is "
+        f"{rule['precision']:.0%} for the rule, {logistic:.0%} for Logistic "
+        f"Regression, and {forest:.0%} for the Random Forest"
+    )
+
+
+def plot_pr_curves(
+    curves: pd.DataFrame, metrics: dict, n_days: int, path: Path
+) -> Path:
+    """Draw figure 7: precision and recall for both models, with the baselines."""
+    fig, axis = new_figure()
+    styles = {"random_forest": ("Random Forest", BLUE),
+              "logistic_regression": ("Logistic Regression", ORANGE)}
+    for name, (label, color) in styles.items():
+        rows = curves[curves["model"] == name].sort_values("threshold")
+        rows = rows[rows["recall"] > 0]
+        axis.plot(rows["recall"], rows["precision"], color=color, linewidth=2.5,
+                  label=label)
+        point = metrics[name]
+        axis.scatter([point["recall"]], [point["precision"]], color=color, s=70,
+                     edgecolor=BLACK, zorder=3)
+    rule = metrics["history_rule"]
+    axis.scatter([rule["recall"]], [rule["precision"]], marker="s", s=90, color=BLACK,
+                 zorder=3, label="History rule")
+    axis.scatter([0], [0], marker="x", s=90, color=GRAY, zorder=3,
+                 label="Majority class (finds no slow request)")
+    share = metrics["test_slow_share"]
+    axis.axhline(share, color=GRAY, linestyle=":", linewidth=1.5)
+    axis.text(0.98, share + 0.012, "Share of slow requests in the test window",
+              color="#444444", ha="right")
+    axis.text(0.02, 0.30, "Circles mark the threshold 0.5", color="#444444")
+    axis.set_xlim(0, 1.0)
+    axis.set_ylim(0, 1.05)
+    axis.set_xlabel("Recall of the slow class (share of slow requests found)")
+    axis.set_ylabel("Precision of the slow class (share of alerts that are right)")
+    axis.legend(frameon=False, loc="lower center", ncol=2, bbox_to_anchor=(0.5, 0.0))
+    title = title_pr_curves(curves, rule)
+    return save_figure(fig, title, "pr_curve.csv, metrics.json", n_days, path)
+
+
+# Figure 8: slow requests in each risk decile.
+
+def title_deciles(deciles: pd.DataFrame) -> str:
+    """Build the title of figure 8."""
+    top = 2
+    share = deciles.sort_values("decile").iloc[top - 1]["cumulative_share"]
+    percent_of_requests = top * 100 // len(deciles)
+    return (
+        f"The riskiest {percent_of_requests}% of requests hold {share:.0%} "
+        "of all slow requests"
+    )
+
+
+def plot_decile_capture(deciles: pd.DataFrame, n_days: int, path: Path) -> Path:
+    """Draw figure 8: bars of the slow share in each decile and a cumulative line."""
+    fig, axis = new_figure()
+    table = deciles.sort_values("decile")
+    axis.bar(table["decile"], table["share_of_all_slow"], color=BLUE,
+             label="Share of all slow requests in the decile")
+    axis.plot(table["decile"], table["cumulative_share"], color=VERMILLION, marker="o",
+              linewidth=2.5, label="Cumulative share")
+    for decile, value in zip(table["decile"], table["share_of_all_slow"]):
+        if value >= INSIDE_LABEL_SHARE:
+            axis.text(decile, value - 0.02, percent(value), ha="center", va="top",
+                      color="white", fontweight="bold")
+        else:
+            axis.text(decile, value + 0.012, percent(value), ha="center", va="bottom")
+    for decile, value in zip(table["decile"][1:3], table["cumulative_share"][1:3]):
+        axis.text(decile + 0.12, value - 0.045, f"{value:.0%} cumulative", ha="left",
+                  va="top", color=VERMILLION)
+    axis.set_xticks(list(table["decile"]))
+    axis.set_xlabel("Risk decile of the Random Forest (1 = riskiest 10% of requests)")
+    axis.set_ylabel("Share of all slow requests (%)")
+    pct_axis(axis, "y")
+    axis.set_ylim(top=1.08)
+    axis.legend(frameon=False, loc="center right")
+    title = title_deciles(table)
+    return save_figure(fig, title, "decile_capture_rf.csv", n_days, path)
+
+
+# Figure 9: the feature groups of the Random Forest.
+
+GROUP_LABELS = {
+    "h1": "History: agency, type, descriptor (h1)",
+    "h2": "History: type, borough (h2)",
+    "h3": "History: ZIP code (h3)",
+    "agency": "Agency",
+    "complaint_type": "Problem type",
+    "descriptor_g": "Problem detail",
+    "location_type_g": "Location type",
+    "borough": "Borough",
+    "channel": "Filing channel",
+    "hour": "Hour of day",
+    "dow": "Weekday",
+    "is_weekend": "Weekend flag",
+}
+HISTORY_GROUPS = ("h1", "h2", "h3")
+
+
+def title_importance(groups: pd.DataFrame) -> str:
+    """Build the title of figure 9."""
+    ordered = groups.sort_values("importance", ascending=False)
+    history = groups.loc[groups["group"].isin(HISTORY_GROUPS), "importance"].sum()
+    top = ordered.iloc[0]
+    return (
+        f"History features hold {history:.0%} of the Random Forest importance. "
+        f"The group {top['group']} alone holds {top['importance']:.0%}"
+    )
+
+
+def plot_feature_importance(groups: pd.DataFrame, n_days: int, path: Path) -> Path:
+    """Draw figure 9: horizontal bars of the importance of each feature group."""
+    fig, axis = new_figure()
+    ordered = groups.sort_values("importance", ascending=False).reset_index(drop=True)
+    colors = [BLUE if name in HISTORY_GROUPS else GRAY for name in ordered["group"]]
+    positions = list(range(len(ordered)))
+    axis.barh(positions, ordered["importance"], color=colors)
+    axis.set_yticks(positions)
+    axis.set_yticklabels([GROUP_LABELS.get(name, name) for name in ordered["group"]])
+    axis.invert_yaxis()
+    for position, value in zip(positions, ordered["importance"]):
+        axis.text(value + 0.006, position, percent(value), va="center")
+    pct_axis(axis, "x")
+    axis.set_xlim(right=ordered["importance"].max() * 1.15)
+    axis.set_xlabel("Share of Random Forest importance (%), blue = history features")
+    axis.set_ylabel("Feature group")
+    title = title_importance(groups)
+    return save_figure(fig, title, "feature_importance_groups_rf.csv", n_days, path)
+
+
+# Figure 10: right and wrong predictions of the Random Forest.
+
+def confusion_cells(matrix: pd.DataFrame) -> dict[str, int]:
+    """Return the four counts from the confusion matrix table."""
+    rows = matrix.set_index("actual")
+    return {
+        "tn": int(rows.loc["not_slow", "predicted_not_slow"]),
+        "fp": int(rows.loc["not_slow", "predicted_slow"]),
+        "fn": int(rows.loc["slow", "predicted_not_slow"]),
+        "tp": int(rows.loc["slow", "predicted_slow"]),
+    }
+
+
+def title_confusion(matrix: pd.DataFrame) -> str:
+    """Build the title of figure 10."""
+    cells = confusion_cells(matrix)
+    recall = cells["tp"] / (cells["tp"] + cells["fn"])
+    precision = cells["tp"] / (cells["tp"] + cells["fp"])
+    return (
+        f"The Random Forest finds {recall:.0%} of slow requests. "
+        f"{precision:.0%} of its slow alerts are right"
+    )
+
+
+def plot_confusion_matrix(matrix: pd.DataFrame, n_days: int, path: Path) -> Path:
+    """Draw figure 10: an annotated 2 by 2 grid of counts and shares."""
+    fig, axis = new_figure()
+    cells = confusion_cells(matrix)
+    total = sum(cells.values())
+    layout = {(0, 0): ("tn", "Right: not slow"), (0, 1): ("fp", "Wrong: false alarm"),
+              (1, 0): ("fn", "Wrong: missed slow"), (1, 1): ("tp", "Right: slow found")}
+    for (row, column), (key, label) in layout.items():
+        share = cells[key] / total
+        color = BLUE if row == column else VERMILLION
+        axis.add_patch(plt.Rectangle((column, 1 - row), 1, 1, facecolor=color,
+                                     alpha=0.15 + 0.85 * share, edgecolor="white",
+                                     linewidth=3))
+        text_color = "white" if share > 0.35 else BLACK
+        text = f"{cells[key]:,}\n{share:.1%} of requests\n{label}"
+        axis.text(column + 0.5, 1.5 - row, text, ha="center", va="center",
+                  color=text_color, fontsize=FONT_SIZE + 2)
+    axis.set_xlim(0, 2)
+    axis.set_ylim(0, 2)
+    axis.set_xticks([0.5, 1.5])
+    axis.set_xticklabels(["Predicted not slow", "Predicted slow"])
+    axis.set_yticks([0.5, 1.5])
+    axis.set_yticklabels(["Actually slow", "Actually not slow"])
+    axis.set_xlabel("Prediction of the Random Forest (threshold 0.5)")
+    axis.set_ylabel("What happened")
+    axis.spines[:].set_visible(False)
+    axis.tick_params(length=0)
+    title = title_confusion(matrix)
+    return save_figure(fig, title, "confusion_matrix_rf.csv", n_days, path)
+
+
 def read_threshold(processed: Path) -> int:
     """Read N from run_params.properties."""
     values = read_properties(processed / "run_params.properties")
@@ -394,6 +627,24 @@ def draw_descriptive(tables: Path, figures: Path, n_days: int) -> list[Path]:
     ]
 
 
+def draw_evaluation(results: Path, figures: Path, n_days: int) -> list[Path]:
+    """Draw figures 6 to 10 from the model tables and metrics.json."""
+    tables = results / "tables"
+    metrics = json.loads((results / "metrics.json").read_text(encoding="utf-8"))
+    return [
+        plot_model_comparison(read_table(tables, "metrics_by_model.csv"), n_days,
+                              figures / "fig06_model_comparison.png"),
+        plot_pr_curves(read_table(tables, "pr_curve.csv"), metrics, n_days,
+                       figures / "fig07_pr_curves.png"),
+        plot_decile_capture(read_table(tables, "decile_capture_rf.csv"), n_days,
+                            figures / "fig08_decile_capture.png"),
+        plot_feature_importance(read_table(tables, "feature_importance_groups_rf.csv"),
+                                n_days, figures / "fig09_feature_importance.png"),
+        plot_confusion_matrix(read_table(tables, "confusion_matrix_rf.csv"), n_days,
+                              figures / "fig10_confusion_matrix.png"),
+    ]
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     """Read the command line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -408,7 +659,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     results = Path(args.results)
     n_days = read_threshold(Path(args.processed))
-    written = draw_descriptive(results / "tables", results / "figures", n_days)
+    figures = results / "figures"
+    written = draw_descriptive(results / "tables", figures, n_days)
+    written += draw_evaluation(results, figures, n_days)
     for path in written:
         print(f"wrote {path}")
     print("PLOTS OK")
