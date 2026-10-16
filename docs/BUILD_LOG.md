@@ -214,3 +214,51 @@ Notes:
 Problems fixed:
 
 - Three lines were longer than 88 characters. They were shortened before the commit.
+
+## 2026-10-16, Phase 7: PySpark models and evaluation
+
+Commits:
+
+- feat(python): add feature pipeline and class weights
+- feat(python): add evaluation tables and feature importance by group
+- feat(python): add model builders and training script
+- test(python): add tests for pipeline stages and importance grouping
+- docs(results): add model metrics and result tables
+
+Exit check results:
+
+- .venv/bin/python -m pytest -q python/tests passed with 52 tests.
+- The rehearsal with --fast on the slice and the full run both ended with TRAIN OK.
+- For every model, tp + fp + tn + fn equals test_rows (956730). Source: results/metrics.json.
+- The Random Forest importances sum to 1.0. Source: results/tables/feature_importance_groups_rf.csv.
+
+Test metrics at the threshold 0.5, N = 3 days (source: results/tables/metrics_by_model.csv):
+
+| Model | Accuracy | Precision | Recall | F1 | AUC ROC | AUC PR | Train seconds |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| majority | 0.7715 | 0.0000 | 0.0000 | 0.0000 | 0.5000 | 0.2285 | |
+| history_rule | 0.9032 | 0.8143 | 0.7469 | 0.7791 | 0.9504 | 0.8427 | |
+| logistic_regression | 0.8910 | 0.7073 | 0.8922 | 0.7891 | 0.9560 | 0.8578 | 23.9 |
+| random_forest | 0.8885 | 0.7027 | 0.8874 | 0.7843 | 0.9492 | 0.8094 | 122.0 |
+| random_forest_no_history | 0.7129 | 0.4428 | 0.9920 | 0.6123 | 0.9277 | 0.7689 | 103.0 |
+
+Findings:
+
+- The Random Forest F1 is 0.7843. The history rule F1 is 0.7791. The Random Forest beats the rule on F1 by 0.0052.
+- The Random Forest does not beat the history rule on AUC ROC (0.9492 against 0.9504) or on AUC PR (0.8094 against 0.8427).
+- The Logistic Regression beats the Random Forest and the history rule on F1, AUC ROC, and AUC PR.
+- The history features matter. Without them the Random Forest F1 falls from 0.7843 to 0.6123.
+- The groups h1 and h2 hold 0.4327 and 0.2352 of the Random Forest importance. Source: results/tables/feature_importance_groups_rf.csv.
+- The top two deciles hold 0.7245 of all slow requests. The lift of decile 1 is 3.75. Source: results/tables/decile_capture_rf.csv.
+- The class weights make the models favor recall. The precision of the three models is lower than the precision of the history rule.
+- The agency NYPD has a slow share of 0.0001, so the Random Forest finds no slow request there. Source: results/tables/metrics_by_agency_rf.csv.
+
+Decisions:
+
+- The Random Forest does not clearly beat the baselines. No setting was tuned on the test window, as the plan states.
+- The results summary must report that the Logistic Regression is the best model on the test window.
+
+Problems fixed:
+
+- Two new tests had wrong expected values. The importance test used a vector of 13 values, but the lengths need 11. The decile test expected exactly 10 slow rows in decile 1, but the cut points are approximate quantiles and decile 1 holds 11 rows. The tests now check the property that matters. The code did not change.
+- The plan lists the evaluation tables after the training script. The code order in the commits is changed, because the training script imports the table functions.
