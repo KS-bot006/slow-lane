@@ -74,3 +74,38 @@ Problems fixed:
 
 - The first full run printed RejectedExecutionException traces after PROFILE OK. The cause was an unpersist call that did not wait before the context stopped. The job now calls unpersist with blocking = true. The tables did not change.
 - The sbt package step prints a warning that it found multiple main classes. This is an sbt message, not a compiler warning. The jar and the job are not affected.
+
+## 2026-10-16, Phase 3: Scala threshold and rankings
+
+Commits:
+
+- feat(scala): add statistics helpers, group keys, and shared pipeline
+- refactor(scala): share job helpers from Pipeline in the profile job
+- feat(scala): add threshold rule and run parameters
+- test(scala): add tests for statistics helpers and group keys
+- feat(scala): add threshold job with fixed selection rule
+- feat(scala): add ranking job with multi-level aggregation and join
+- docs(results): add threshold and ranking tables
+
+Exit check results:
+
+- cd scala && sbt -batch test passed with 40 tests. The Wilson values match the plan within 0.001.
+- ThresholdJob on the full file ended with THRESHOLD OK. data/processed/run_params.properties has slow_threshold_days=3.
+- RankingJob on the full file ended with RANKING OK and one reconcile: ok line for each of the 9 grains. Each grain sums to 3596374 clean rows.
+- In every row of every ranking and pattern table, wilson_low is at most slow_share, and slow_share is at most wilson_high.
+- The smallest n in rank_complaint_type.csv is 623. All ranking tables keep groups with n of at least 500.
+
+Threshold selection (source: results/tables/threshold_selection.csv):
+
+- History window rows: 1734203.
+- Slow share above 1 day: 0.3813. Above 3 days: 0.2393. Above 7 days: 0.1585.
+- The default of 3 days is inside share_min and share_max, so N is 3.
+
+Notes:
+
+- type_owner.csv keeps every complaint type, as the plan states no minimum group size for it. Its smallest n is 1.
+
+Problems fixed:
+
+- The first ranking run wrote n as 537219.0. The cause was that Scala widened the Long value to Double in a mixed Seq. The code now types the Seq as Seq[Any]. The tables were written again.
+- The compiler gave a warning that a type was inferred as AnyVal. The cause was the same mixed Seq in ThresholdJob. The code now types the Seq as Seq[Any].
