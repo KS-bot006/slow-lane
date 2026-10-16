@@ -43,6 +43,20 @@ def with_history_rule(df: DataFrame) -> DataFrame:
     return df.withColumn(PREDICTION, rule).withColumn(SCORE, F.col(RULE_COLUMN))
 
 
+def baseline_metrics(train: DataFrame, test: DataFrame) -> dict[str, dict]:
+    """Return the test metrics of the majority baseline and the history rule."""
+    label = majority_label(train)
+    return {
+        "majority": {
+            "label": label,
+            **evaluate_scored(with_majority(test, label), LABEL, PREDICTION, SCORE),
+        },
+        "history_rule": evaluate_scored(
+            with_history_rule(test), LABEL, PREDICTION, SCORE
+        ),
+    }
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     """Read the command line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -64,21 +78,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR {error}", file=sys.stderr)
         return 1
     try:
-        label = majority_label(train)
         test = test.cache()
         results = {
             "slow_threshold_days": get_int(config, "slow_threshold_days"),
             "history_slow_share": get_float(config, "history_slow_share"),
             "test_slow_share": test.agg(F.avg(LABEL)).first()[0],
-            "majority": {
-                "label": label,
-                **evaluate_scored(with_majority(test, label), LABEL, PREDICTION, SCORE),
-            },
-            "history_rule": evaluate_scored(
-                with_history_rule(test), LABEL, PREDICTION, SCORE
-            ),
+            **baseline_metrics(train, test),
         }
-        print(f"majority label: {label}, test rows: {results['majority']['test_rows']}")
+        majority = results["majority"]
+        print(f"majority label: {majority['label']}, rows: {majority['test_rows']}")
         output = Path(args.out)
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
