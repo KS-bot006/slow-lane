@@ -109,3 +109,44 @@ Problems fixed:
 
 - The first ranking run wrote n as 537219.0. The cause was that Scala widened the Long value to Double in a mixed Seq. The code now types the Seq as Seq[Any]. The tables were written again.
 - The compiler gave a warning that a type was inferred as AnyVal. The cause was the same mixed Seq in ThresholdJob. The code now types the Seq as Seq[Any].
+
+## 2026-10-16, Phase 4: Scala history features
+
+Commits:
+
+- feat(scala): add history statistics and feature rows
+- feat(scala): add feature job with Parquet output
+- docs(results): add feature summary and history coverage tables
+
+Exit check results:
+
+- cd scala && sbt -batch test passed with 48 tests.
+- FeatureJob ended with FEATURES OK on the slice (46532 rows) and on the full file (1862171 rows).
+- The folder data/processed/features.parquet has the file _SUCCESS and 8 part files. The size is 54 MB.
+- The file has 24 columns, no null value, and 1862171 different unique_key values.
+- The latest train created_date is 2025-09-30T23:59:48. The earliest test created_date is 2025-10-01T00:00:14.
+- feature_summary.csv shows rows in both windows. Source: results/tables/feature_summary.csv.
+
+Feature summary (source: results/tables/feature_summary.csv):
+
+- Train: 905441 rows, 228984 slow rows, slow share 0.2529.
+- Test: 956730 rows, 218635 slow rows, slow share 0.2285.
+
+History coverage, the share of rows whose key exists in the history window (source: results/tables/history_coverage.csv):
+
+| Window | h1 (agency, type, descriptor) | h2 (type, borough) | h3 (ZIP) |
+| --- | --- | --- | --- |
+| train | 0.9995 | 0.9997 | 0.9999 |
+| test | 0.9963 | 0.9969 | 1.0000 |
+
+- The test window has lower h1 and h2 coverage than the train window. The test window is farther from the history window.
+- A key that is not in the history gets the history-wide average. The model sees no missing value.
+
+Bucket lists (source: results/tables/bucket_lists.csv):
+
+- The file lists 100 descriptors and 30 location types from the history window, with their history counts.
+
+Problems fixed:
+
+- The first version of FeatureJob had 10 lines of more than 100 characters. The job was written again with shorter lines before the first run.
+- A check of the Parquet schema with pandas failed because the project does not install pyarrow. The check used PySpark instead.
