@@ -262,3 +262,37 @@ Problems fixed:
 
 - Two new tests had wrong expected values. The importance test used a vector of 13 values, but the lengths need 11. The decile test expected exactly 10 slow rows in decile 1, but the cut points are approximate quantiles and decile 1 holds 11 rows. The tests now check the property that matters. The code did not change.
 - The plan lists the evaluation tables after the training script. The code order in the commits is changed, because the training script imports the table functions.
+
+## 2026-10-16, Phase 8: Visualization
+
+Commits:
+
+- feat(python): add plot helpers and descriptive figures
+- feat(python): add model evaluation figures
+- test(python): add plot tests
+- docs(results): add figures
+
+Exit check results:
+
+- The command PYTHONPATH=python .venv/bin/python -m nyc311.plots ended with PLOTS OK and wrote 10 PNG files to results/figures/.
+- Each PNG is 2000 by 1120 pixels, which is 10 by 5.6 inches at 200 dpi.
+- .venv/bin/python -m pytest -q python/tests passed with 62 tests.
+- The agent opened every figure. Each figure follows the figure rules.
+- The rules checked: Okabe-Ito colors, a font size of at least 11 points, and axes with units.
+- Bars start at zero. Each title comes from the table. Each footer names the source.
+
+What the agent fixed after it opened the figures:
+
+- Figures 2 and 3: the label for the share of all requests lay on a bar. It now stands above the first bar. The label (SPIT) in figure 2 had lost its capitals. The value labels now have a white background where they touch the line. In figure 3 the bars below the share of all requests are gray.
+- Figure 5: the footer was cut off at the right edge, and the labels of the weekday and month axes touched each other. The figure now has two rows, with the hour panel on top.
+- All figures: the footer has two fixed lines. Some footers wrapped with one word alone on the second line.
+- Figure 6: the title showed 0.78 for the Random Forest and for the history rule. The title now has three decimals (0.784 and 0.779).
+- Figure 7: the legend covered the curves. The Logistic Regression curve had a false diagonal from the point (0, 0). The cause is the threshold 1.00, where no request is predicted slow and the precision is set to 0.0. The curves now start at the first threshold with predictions.
+- Figure 8: the line crossed the label of decile 1. The labels of tall bars are now inside the bars. The cumulative share is labeled for deciles 2 and 3.
+- Figure 9: the title read "History: agency, type, descriptor alone holds 43%". It now reads "The group h1 alone holds 43%".
+- Tests: one expected value was wrong. The share closed within 16 hours in the fixture is 93 percent, not 83 percent. The code did not change.
+
+Notes:
+
+- Figure 4 shows the 12 types with the most requests in the table rank_type_borough.csv. That table keeps only groups of at least 500 requests. A cell with fewer requests shows n < 500.
+- The model figures show the Logistic Regression as the best model on F1, as in docs/BUILD_LOG.md for Phase 7. Source: results/tables/metrics_by_model.csv.
