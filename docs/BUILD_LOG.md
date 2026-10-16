@@ -180,3 +180,37 @@ Problems fixed:
 - The first full run stopped when the computer shut down during the hold. The tables fault_tolerance.csv and spark_context.csv were not written. The job ran again, and the tables and screenshots come from the second run.
 - The first dag_job.png showed the Jobs list and not the DAG of the job with the shuffle. The human saved the screenshot again from the page of job 9.
 - The check is a simulation. A local run has no executor that can fail. This is stated in docs/spark_concepts.md.
+
+## 2026-10-16, Phase 6: PySpark data and baselines
+
+Commits:
+
+- chore: ignore slice metric files
+- feat(python): add config, session, and data loading with leakage guards
+- feat(python): add metric functions and baselines
+- test(python): add tests for metrics and leakage guards
+- docs(results): add baseline metrics
+
+Exit check results:
+
+- .venv/bin/python -m pytest -q python/tests passed with 41 tests.
+- Both baseline runs (slice and full file) ended with BASELINES OK.
+- results/metrics_baselines.json has the entries majority and history_rule. Each has accuracy, precision, recall, f1, auc_roc, auc_pr, tp, fp, tn, fn, and test_rows.
+- The majority accuracy is 0.7715, which equals 1 minus the test slow share of 0.2285. Its recall is 0. Source: results/metrics_baselines.json.
+- All leakage guards passed on the full feature table.
+
+Baseline metrics on the test window, 956730 rows, N = 3 days (source: results/metrics_baselines.json):
+
+| Baseline | Accuracy | Precision | Recall | F1 | AUC ROC | AUC PR |
+| --- | --- | --- | --- | --- | --- | --- |
+| majority (predicts not slow) | 0.7715 | 0.0000 | 0.0000 | 0.0000 | 0.5000 | 0.2285 |
+| history rule (h1_slow_rate at least 0.5) | 0.9032 | 0.8143 | 0.7469 | 0.7791 | 0.9504 | 0.8427 |
+
+Notes:
+
+- The history rule is a strong baseline. A Phase 7 model must beat F1 0.7791 and AUC ROC 0.9504 to show a gain.
+- The majority baseline predicts the label that is most frequent in the train window. That label is 0.0.
+
+Problems fixed:
+
+- Three lines were longer than 88 characters. They were shortened before the commit.
