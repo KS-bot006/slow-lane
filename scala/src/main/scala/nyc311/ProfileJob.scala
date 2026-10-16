@@ -6,14 +6,13 @@ import org.apache.spark.storage.StorageLevel
 import org.apache.spark.{SparkConf, SparkContext}
 
 object ProfileJob {
-  private val ConfigPath = "config/project.properties"
-  private val DefaultOutput = "results/tables"
-  private val DefaultMinPartitions = 8
-  private val MaxCollectRows = 10000
+  import Pipeline.{collectSmall, fail, FailureExit, HumanDecisionExit => HeaderExit}
+
+  private val ConfigPath = Pipeline.ConfigPath
+  private val DefaultOutput = Pipeline.DefaultOutput
+  private val DefaultMinPartitions = Pipeline.DefaultMinPartitions
   private val QuantileLevels = Vector(0.5, 0.75, 0.9, 0.95, 0.99)
   private val SampleSize = 5
-  private val FailureExit = 1
-  private val HeaderExit = 2
 
   def main(args: Array[String]): Unit = {
     val options = Args.parse(args.toSeq).fold(message => fail(message, FailureExit), identity)
@@ -78,14 +77,6 @@ object ProfileJob {
   private def countByKey(keys: RDD[String]): Array[(String, Long)] =
     collectSmall(keys.map(key => (key, 1L)).reduceByKey(_ + _).sortByKey())
 
-  private def collectSmall[T](rdd: RDD[T]): Array[T] = {
-    val rows = rdd.take(MaxCollectRows + 1)
-    if (rows.length > MaxCollectRows) {
-      fail(s"A result has more than $MaxCollectRows rows. Stop before collect.", FailureExit)
-    }
-    rows
-  }
-
   // Every line after the header must be a reject, a drop, or a clean row.
   private def reconcile(
       linesRead: Long, rejects: Array[(String, Long)], drops: Array[(String, Long)], clean: Long
@@ -137,9 +128,4 @@ object ProfileJob {
 
   private def bucketRow(bucket: Int, rows: Long): Seq[Any] =
     if (bucket == 0) Seq(0, 0, 1, rows) else Seq(bucket, 1L << (bucket - 1), 1L << bucket, rows)
-
-  private def fail(message: String, code: Int): Nothing = {
-    System.err.println(s"ERROR $message")
-    sys.exit(code)
-  }
 }
