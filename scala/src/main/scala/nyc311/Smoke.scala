@@ -9,7 +9,8 @@ object Smoke {
   def main(args: Array[String]): Unit = {
     // Use local[2] only when spark-submit gives no master. A direct run then still works.
     val baseConf = new SparkConf().setAppName("Smoke")
-    val conf = if (baseConf.contains("spark.master")) baseConf else baseConf.setMaster(FallbackMaster)
+    val hasMaster = baseConf.contains("spark.master")
+    val conf = if (hasMaster) baseConf else baseConf.setMaster(FallbackMaster)
     val sc = new SparkContext(conf)
     try {
       val total = sc.parallelize(1 to LastNumber).reduce(_ + _)
