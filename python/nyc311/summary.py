@@ -103,8 +103,105 @@ def table(header: list[str], rows: list[list[str]]) -> list[str]:
     return lines
 
 
+MANIFEST = "data/MANIFEST.json"
+ROW_COUNTS = "profile_row_counts.csv"
+
+
+def row_counts(inputs: Inputs) -> dict[tuple[str, str], int]:
+    """Return the profile row counts as a dict with the key (kind, name)."""
+    frame = inputs.tables[ROW_COUNTS]
+    return {(row.kind, row.name): int(row.rows) for row in frame.itertuples()}
+
+
+def section_dataset(inputs: Inputs) -> list[str]:
+    """Write the section about the data, the windows, and the dropped rows."""
+    manifest = inputs.manifest
+    counts = row_counts(inputs)
+    data_lines = counts[("lines", "lines_read")] - counts[("lines", "header_lines")]
+    rejected = sum(rows for (kind, _), rows in counts.items() if kind == "reject")
+    drops = {name: rows for (kind, name), rows in counts.items() if kind == "drop"}
+    clean = counts[("clean", "clean_rows")]
+    if clean + sum(drops.values()) + rejected != manifest["total_rows"]:
+        raise SummaryError("Clean, dropped, and rejected rows differ from the manifest")
+    profile = source(ROW_COUNTS)
+    rows = [
+        ["Dataset ID", manifest["dataset_id"], MANIFEST],
+        ["Download time (UTC)", manifest["downloaded_at_utc"], MANIFEST],
+        ["Columns used", count(len(manifest["columns"])), MANIFEST],
+        ["Requests downloaded", count(manifest["total_rows"]), MANIFEST],
+        ["Lines rejected by the parser", count(rejected), profile],
+        ["Clean rows", count(clean), profile],
+    ]
+    for window in ("history", "train", "test"):
+        rows.append([f"Clean rows in the {window} window",
+                     count(counts[("window", window)]), profile])
+    for name in sorted(drops):
+        rows.append([f"Rows dropped: {name}", count(drops[name]), profile])
+    open_share = drops.get("open_no_closed_date", 0) / data_lines
+    label = "Share of open requests (no closed date)"
+    rows.append([label, percent(open_share, 2), profile])
+    return [
+        "## Dataset",
+        "",
+        f"The data is the NYC 311 service request dataset {manifest['dataset_id']} "
+        f"from NYC Open Data. It holds {count(manifest['total_rows'])} requests that "
+        f"were created in {manifest['year']}. Clean rows, dropped rows, and rejected "
+        "lines add up to the number of requests.",
+        "",
+    ] + table(["Item", "Value", "Source"], rows)
+
+
+def selected_threshold(inputs: Inputs) -> pd.Series:
+    """Return the selected row of the threshold table. Check N in three files."""
+    frame = inputs.tables["threshold_selection.csv"]
+    chosen = frame[frame["selected"].astype(str).str.lower() == "true"]
+    if len(chosen) != 1:
+        raise SummaryError("The threshold table needs exactly one selected row.")
+    days = int(chosen.iloc[0]["candidate_days"])
+    if days != int(inputs.run_params["slow_threshold_days"]) or days != int(
+        inputs.metrics["slow_threshold_days"]
+    ):
+        raise SummaryError("N differs between the threshold table and the run files.")
+    return chosen.iloc[0]
+
+
+def section_target(inputs: Inputs) -> list[str]:
+    """Write the section about the target N and the slow share in each window."""
+    chosen = selected_threshold(inputs)
+    days = int(chosen["candidate_days"])
+    frame = inputs.tables["threshold_selection.csv"]
+    candidates = [
+        [count(row.candidate_days), percent(row.slow_share, 2),
+         "yes" if str(row.selected).lower() == "true" else "no"]
+        for row in frame.itertuples()
+    ]
+    windows = [["history", count(chosen["history_rows"]), count(chosen["slow_rows"]),
+                percent(chosen["slow_share"], 2), source("threshold_selection.csv")]]
+    summary = inputs.tables["feature_summary.csv"].set_index("window")
+    for window in ("train", "test"):
+        row = summary.loc[window]
+        windows.append([window, count(row["rows"]), count(row["slow_rows"]),
+                        percent(row["slow_share"], 2), source("feature_summary.csv")])
+    names = ", ".join(count(value) for value in frame["candidate_days"])
+    return [
+        "## Target",
+        "",
+        f"A request is slow when it takes more than {days} days to close. "
+        f"ThresholdJob selected N = {days} from the history window. "
+        f"The candidates were {names} days.",
+        "",
+        "Slow share of each candidate in the history window. "
+        f"Source: {source('threshold_selection.csv')}.",
+        "",
+    ] + table(["N (days)", "Slow share", "Selected"], candidates) + [
+        "",
+        "Slow share of each window.",
+        "",
+    ] + table(["Window", "Rows", "Slow rows", "Slow share", "Source"], windows)
+
+
 Section = Callable[[Inputs], list[str]]
-SECTIONS: list[Section] = []
+SECTIONS: list[Section] = [section_dataset, section_target]
 
 
 def render(inputs: Inputs) -> str:
