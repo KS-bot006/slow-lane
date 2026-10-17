@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Run every stage of the build in order. The script stops at the first failure.
-# Usage: bash scripts/run_all.sh [--skip-download]
+# The option --rehearse runs the same stages on the slice. It uses the folders that
+# end in _slice and train --fast. It never changes the committed results.
+# Usage: bash scripts/run_all.sh [--skip-download] [--rehearse]
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,6 +12,7 @@ PYTHON=".venv/bin/python"
 export PYTHONPATH=python
 
 SKIP_DOWNLOAD=0
+REHEARSE=0
 INPUT="data/raw/311_2025.tsv"
 PROCESSED="data/processed"
 RESULTS="results"
@@ -21,9 +24,25 @@ TRAIN_ARGS=()
 for argument in "$@"; do
   case "${argument}" in
     --skip-download) SKIP_DOWNLOAD=1 ;;
+    --rehearse) REHEARSE=1 ;;
     *) echo "Unknown option: ${argument}" >&2; exit 2 ;;
   esac
 done
+
+if [ "${REHEARSE}" -eq 1 ]; then
+  SKIP_DOWNLOAD=1
+  INPUT="data/raw/311_2025_slice.tsv"
+  PROCESSED="data/processed_slice"
+  RESULTS="results_slice"
+  TABLES="results_slice/tables"
+  SPARK_OUT="results_slice/spark"
+  BASELINES_OUT="results_slice/metrics_baselines.json"
+  TRAIN_ARGS=(--fast)
+  if [ ! -f "${INPUT}" ]; then
+    echo "The slice ${INPUT} is missing. Run bash scripts/make_slice.sh first." >&2
+    exit 2
+  fi
+fi
 
 # Print the name and the command of a stage, run it, and print the time.
 stage() {
@@ -51,8 +70,11 @@ download() {
   bash scripts/make_slice.sh
 }
 
+# A rehearsal only checks the summary. A new summary would hold the numbers of the slice.
 summary() {
-  "${PYTHON}" -m nyc311.summary
+  if [ "${REHEARSE}" -eq 0 ]; then
+    "${PYTHON}" -m nyc311.summary
+  fi
   "${PYTHON}" -m nyc311.summary --check
 }
 
