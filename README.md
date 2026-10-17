@@ -81,7 +81,3 @@ The file docs/results_summary.md collects every number and names its source file
 - N is the same for all problem types, but agencies have different service targets.
 - The class weights make precision lower at the threshold 0.5.
 - The Logistic Regression scores a higher F1 than the Random Forest on the test window. The file docs/results_summary.md shows the numbers.
-
-## Use of AI tools
-
-An AI coding assistant (Claude, from Anthropic) wrote the code and the documents from the build plan, and the authors checked each result.
