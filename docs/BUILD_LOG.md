@@ -296,3 +296,96 @@ Notes:
 
 - Figure 4 shows the 12 types with the most requests in the table rank_type_borough.csv. That table keeps only groups of at least 500 requests. A cell with fewer requests shows n < 500.
 - The model figures show the Logistic Regression as the best model on F1, as in docs/BUILD_LOG.md for Phase 7. Source: results/tables/metrics_by_model.csv.
+
+## 2026-10-17, Phase 9: Results summary and rubric evidence
+
+Commits:
+
+- feat(python): add summary readers for manifest, tables, and metrics
+- feat(python): add dataset and target sections to the summary
+- feat(python): add Spark and slowness sections to the summary
+- feat(python): add model comparison and limits sections
+- feat(python): add summary check command
+- test(python): add tests for summary and check
+- docs: add results summary
+- docs: add rubric evidence
+
+Exit check results:
+
+- PYTHONPATH=python .venv/bin/python -m nyc311.summary ended with SUMMARY OK. The option --check also ended with SUMMARY OK.
+- docs/results_summary.md has no TODO, TBD, nan, or None. The code checks this in --check.
+- The style check ended with STE CHECK OK for the files in docs/.
+- .venv/bin/python -m pytest -q python/tests passed with 78 tests.
+
+Numbers compared with their source files (the agent read the whole summary first):
+
+| Number in the summary | Value | Source file |
+| --- | --- | --- |
+| Clean rows | 3596374 | results/tables/profile_row_counts.csv |
+| Random Forest F1 | 0.784 | results/tables/metrics_by_model.csv |
+| Mean time without the cache | 2.133 seconds | results/spark/cache_timing.csv |
+| Requests downloaded | 3655042 | data/MANIFEST.json |
+
+Notes:
+
+- The summary generator checks that clean, dropped, and rejected rows equal the manifest total. It also checks that N is the same in three files.
+- The file data/processed/features.parquet is not in Git. The column Evidence path in docs/rubric_evidence.md lists committed files for that rubric item.
+- The comparison sentences say better, equal, or worse as the numbers show. The Random Forest is better than the history rule on F1 only. It is worse than the Logistic Regression on F1, AUC ROC, and AUC PR.
+
+Problems fixed:
+
+- The first version of --check used a path constant that was not defined. The test of the three cases found it.
+- The sentence about the agency that owns the slowest types named one agency when two agencies had the same count. The sentence now names every agency in a tie.
+- A test fixture wrote a file before its folder existed. The fixture now creates the folder first. The code did not change.
+
+## 2026-10-17, Phase 10: Final check
+
+Commits:
+
+- build: add run_all script
+- build: add rehearsal mode to run_all
+- docs: complete README
+- docs: complete build log
+
+Tag: v1.0.0.
+
+Exit check results:
+
+- bash scripts/run_all.sh --rehearse ended with ALL STAGES OK in this repository. It runs 13 stages and takes about 5 minutes.
+- The same command ended with ALL STAGES OK in a clean clone. The clone is a new folder with the raw file and the slice copied in and a new .venv.
+- The agent also ran bash scripts/run_all.sh --skip-download in the clean clone. It ended with ALL STAGES OK and took about 11 minutes.
+- git status shows no changes. git tag shows v1.0.0.
+
+Stage times of the full run in the clean clone are in seconds.
+
+| Stage | Seconds |
+| --- | --- |
+| ProfileJob | 79 |
+| ThresholdJob | 28 |
+| RankingJob | 32 |
+| FeatureJob | 81 |
+| ConceptsJob | 51 |
+| train | 287 |
+| plots | 5 |
+
+Reproduction of the results in the clean clone (source: results/metrics.json of the clone, not committed):
+
+| Model | F1 committed | F1 in the clone | AUC PR committed | AUC PR in the clone |
+| --- | --- | --- | --- | --- |
+| history_rule | 0.7791 | 0.7791 | 0.8427 | 0.8427 |
+| logistic_regression | 0.7891 | 0.7891 | 0.8578 | 0.8578 |
+| random_forest | 0.7843 | 0.7857 | 0.8094 | 0.8122 |
+| random_forest_no_history | 0.6123 | 0.6167 | 0.7689 | 0.7588 |
+
+Findings:
+
+- The baselines and the Logistic Regression give the same numbers in both runs. All counts and all tables from the Scala jobs are the same.
+- The two Random Forests give slightly different numbers, although the seed is fixed. The agent did not find the cause. A likely cause is the order of equal categories in the string indexer, which changes the order of the features.
+- The conclusions do not change. The Logistic Regression has the highest F1, AUC ROC, and AUC PR in both runs. The Random Forest beats the history rule on F1 only.
+- The committed results come from the first run. They are the source of docs/results_summary.md and of the figures.
+
+Open human checks:
+
+- Open every figure in results/figures/ and read docs/results_summary.md.
+- The three Spark UI screenshots exist in results/spark/ui/: dag_job.png, stages.png, and storage.png.
+- The sentence about AI tools in README.md is a draft. The human decides the wording.
