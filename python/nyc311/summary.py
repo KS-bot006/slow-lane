@@ -200,8 +200,156 @@ def section_target(inputs: Inputs) -> list[str]:
     ] + table(["Window", "Rows", "Slow rows", "Slow share", "Source"], windows)
 
 
+def plural(number: int, singular: str, many: str) -> str:
+    """Return the number with the singular or the plural word."""
+    return f"{number} {singular if number == 1 else many}"
+
+
+def spark_partitions(inputs: Inputs) -> list[str]:
+    """Write the partition table and the Spark context sentence."""
+    frame = inputs.spark["partitions.csv"]
+    groups = frame.groupby("rdd_name", sort=False)["rows"].agg(["count", "sum"])
+    rows = [[name, count(row["count"]), count(row["sum"]), source("partitions.csv")]
+            for name, row in groups.iterrows()]
+    context = inputs.spark["spark_context.csv"].iloc[0]
+    return [
+        f"The master is {context['master']}. The default parallelism is "
+        f"{context['default_parallelism']} and the computer has {context['cores']} "
+        f"cores. Source: {source('spark_context.csv')}.",
+        "",
+    ] + table(["RDD", "Partitions", "Rows", "Source"], rows)
+
+
+def spark_lineage(inputs: Inputs) -> list[str]:
+    """Write the sentence about the dependency types of the lineage."""
+    narrow = inputs.lineage.count("(narrow)")
+    shuffle = inputs.lineage.count("(shuffle)")
+    return [
+        "The lineage lists "
+        f"{plural(narrow, 'narrow dependency', 'narrow dependencies')} and "
+        f"{plural(shuffle, 'shuffle dependency', 'shuffle dependencies')}. "
+        "Source: results/spark/lineage.txt."
+    ]
+
+
+def spark_cache(inputs: Inputs) -> list[str]:
+    """Write the cache timing table and the cache storage sentence."""
+    timing = inputs.spark["cache_timing.csv"]
+    by_variant = {name: group.sort_values("run")["seconds"].tolist()
+                  for name, group in timing.groupby("variant")}
+    rows = [[name, *[f"{value:.3f}" for value in values],
+             f"{sum(values) / len(values):.3f}"]
+            for name, values in by_variant.items()]
+    header = ["Variant"] + [f"Run {i + 1} (s)" for i in range(len(rows[0]) - 2)]
+    cached = by_variant["cache"]
+    later = sum(cached[1:]) / len(cached[1:])
+    plain = sum(by_variant["no_cache"]) / len(by_variant["no_cache"])
+    storage = inputs.spark["cache_storage.csv"].iloc[0]
+    return [
+        "Seconds for one count of the clean rows. "
+        f"Source: {source('cache_timing.csv')}.",
+        "",
+    ] + table(header + ["Mean (s)"], rows) + [
+        "",
+        f"The first cached run takes {cached[0]:.3f} seconds, because it fills the "
+        f"cache. The mean of the next cached runs is {later:.3f} seconds. "
+        f"The mean without the cache is {plain:.3f} seconds.",
+        "",
+        f"The cache holds {storage['cached_partitions']} of "
+        f"{storage['total_partitions']} partitions, with "
+        f"{count(storage['memory_bytes'])} bytes in memory and "
+        f"{count(storage['disk_bytes'])} bytes on disk. "
+        f"Source: {source('cache_storage.csv')}.",
+    ]
+
+
+def spark_fault(inputs: Inputs) -> list[str]:
+    """Write the sentence about the fault tolerance check."""
+    frame = inputs.spark["fault_tolerance.csv"]
+    same = bool(frame["equal"].astype(str).str.lower().eq("true").all())
+    result = "are the same" if same else "differ"
+    seconds = float(frame["recompute_seconds"].iloc[0])
+    return [
+        f"After unpersist, Spark recomputes the clean rows in {seconds:.3f} seconds. "
+        f"The count and the sum of the days {result} before and after. "
+        "This is a simulation, because a local run has no executor that can fail. "
+        f"Source: {source('fault_tolerance.csv')}."
+    ]
+
+
+def section_spark(inputs: Inputs) -> list[str]:
+    """Write the section about the Spark processing."""
+    lines = ["## Spark processing", ""]
+    for part in (spark_partitions, spark_lineage, spark_cache, spark_fault):
+        lines += part(inputs) + [""]
+    return lines[:-1]
+
+
+RANKINGS = (
+    ("Problem types", "rank_complaint_type.csv", "complaint_type"),
+    ("Agencies", "rank_agency.csv", "agency"),
+    ("Boroughs", "rank_borough.csv", "borough"),
+    ("ZIP codes", "rank_zip.csv", "zip"),
+)
+TOP = 5
+
+
+def interval(row: pd.Series) -> str:
+    """Return the 95 percent interval of a row as text."""
+    return f"{percent(row['wilson_low'])} to {percent(row['wilson_high'])}"
+
+
+def top_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Return the rows with the highest slow share."""
+    return frame.sort_values(["slow_share", "n"], ascending=False).head(TOP)
+
+
+def dominant_agencies(inputs: Inputs, types: pd.Series) -> dict[str, str]:
+    """Return the dominant agency of each problem type."""
+    owner = inputs.tables["type_owner.csv"].set_index("complaint_type")
+    return {name: owner.loc[name, "dominant_agency"] for name in types}
+
+
+def owner_sentence(owners: dict[str, str]) -> str:
+    """Name the agency or agencies that own most of the slowest problem types."""
+    tally: dict[str, int] = {}
+    for agency in owners.values():
+        tally[agency] = tally.get(agency, 0) + 1
+    most = max(tally.values())
+    leaders = sorted(name for name, number in tally.items() if number == most)
+    total = len(owners)
+    if len(leaders) == 1:
+        text = f"Agency {leaders[0]} is the dominant agency of {most} of the {total}"
+    else:
+        names = ", ".join(leaders[:-1]) + f" and {leaders[-1]}"
+        text = f"Agencies {names} are each the dominant agency of {most} of the {total}"
+    return f"{text} slowest problem types. Source: {source('type_owner.csv')}."
+
+
+def section_slowness(inputs: Inputs) -> list[str]:
+    """Write the five slowest groups of each ranking, with their intervals."""
+    lines = ["## Slowness findings", ""]
+    owners: dict[str, str] = {}
+    for title, name, column in RANKINGS:
+        top = top_rows(inputs.tables[name])
+        if column == "complaint_type":
+            owners = dominant_agencies(inputs, top[column])
+        rows = [[str(row[column]), count(row["n"]), percent(row["slow_share"]),
+                 interval(row)] + ([owners[row[column]]] if owners and
+                                   column == "complaint_type" else [])
+                for _, row in top.iterrows()]
+        header = [title, "Requests", "Slow share", "95% interval"]
+        if column == "complaint_type":
+            header.append("Dominant agency")
+        lines += [f"The {TOP} slowest groups. Source: {source(name)}.", ""]
+        lines += table(header, rows) + [""]
+    return lines + [owner_sentence(owners)]
+
+
 Section = Callable[[Inputs], list[str]]
-SECTIONS: list[Section] = [section_dataset, section_target]
+SECTIONS: list[Section] = [
+    section_dataset, section_target, section_spark, section_slowness,
+]
 
 
 def render(inputs: Inputs) -> str:
