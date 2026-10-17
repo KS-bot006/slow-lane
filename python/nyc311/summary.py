@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import logging
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,6 +24,7 @@ TABLES_DIR = Path("results/tables")
 SPARK_DIR = Path("results/spark")
 RUN_PARAMS_PATH = Path("data/processed/run_params.properties")
 SUMMARY_PATH = Path("docs/results_summary.md")
+RUBRIC_PATH = Path("docs/rubric_evidence.md")
 TABLE_FILES = (
     "profile_row_counts.csv", "threshold_selection.csv", "feature_summary.csv",
     "rank_complaint_type.csv", "rank_agency.csv", "rank_borough.csv", "rank_zip.csv",
@@ -467,11 +470,78 @@ def render(inputs: Inputs) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+EVIDENCE_COLUMN = "Evidence path"
+FORBIDDEN_WORDS = re.compile(r"\b(TODO|TBD|None|nan|NaN)\b")
+
+
+def table_rows(text: str) -> list[tuple[int, list[str]]]:
+    """Return the cells of each Markdown table row with its line number."""
+    rows = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if line.startswith("|"):
+            cells = line.strip("| \n").split("|")
+            rows.append((number, [cell.strip() for cell in cells]))
+    return rows
+
+
+def evidence_paths(text: str) -> list[tuple[int, str]]:
+    """Return (line, path) for each evidence path. An empty cell gives an empty path."""
+    rows = table_rows(text)
+    if not rows or EVIDENCE_COLUMN not in rows[0][1]:
+        raise SummaryError(f"The rubric table has no column '{EVIDENCE_COLUMN}'.")
+    column = rows[0][1].index(EVIDENCE_COLUMN)
+    found: list[tuple[int, str]] = []
+    for number, cells in rows[1:]:
+        if set(cells) <= {"---", ""}:
+            continue
+        paths = re.findall(r"`([^`]+)`", cells[column] if column < len(cells) else "")
+        for path in paths:
+            found.append((number, path.replace("\\_", "_").replace("\\*", "*")))
+        if not paths:
+            found.append((number, ""))
+    return found
+
+
+def check_rubric(root: Path) -> list[str]:
+    """Return an error message for each listed path that does not exist."""
+    text = read_file(root, RUBRIC_PATH).read_text(encoding="utf-8")
+    errors = []
+    for number, path in evidence_paths(text):
+        if not path:
+            errors.append(f"{RUBRIC_PATH}:{number}: the row has no evidence path")
+        elif not glob.glob(str(root / path)):
+            errors.append(f"{RUBRIC_PATH}:{number}: path not found: {path}")
+    return errors
+
+
+def check_summary(root: Path) -> list[str]:
+    """Return an error message for each forbidden word in the summary file."""
+    text = read_file(root, SUMMARY_PATH).read_text(encoding="utf-8")
+    return [
+        f"{SUMMARY_PATH}:{number}: forbidden word '{match.group(1)}'"
+        for number, line in enumerate(text.splitlines(), start=1)
+        for match in FORBIDDEN_WORDS.finditer(line)
+    ]
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     """Read the command line arguments."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=str(ROOT), help="Repository root.")
+    parser.add_argument("--check", action="store_true",
+                        help="Check the evidence paths.")
     return parser.parse_args(argv)
+
+
+def run_check(root: Path) -> int:
+    """Check the evidence paths and the summary file. Return the exit code."""
+    errors = check_rubric(root) + check_summary(root)
+    for message in errors:
+        print(f"ERROR {message}", file=sys.stderr)
+    if errors:
+        return 1
+    print("SUMMARY OK")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -480,6 +550,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     root = Path(args.root)
     try:
+        if args.check:
+            return run_check(root)
         text = render(load_inputs(root))
     except SummaryError as error:
         print(f"ERROR {error}", file=sys.stderr)
