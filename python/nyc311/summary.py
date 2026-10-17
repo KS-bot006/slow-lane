@@ -113,11 +113,17 @@ def row_counts(inputs: Inputs) -> dict[tuple[str, str], int]:
     return {(row.kind, row.name): int(row.rows) for row in frame.itertuples()}
 
 
+def open_share(inputs: Inputs) -> float:
+    """Return the share of requests without a closed date."""
+    counts = row_counts(inputs)
+    data_lines = counts[("lines", "lines_read")] - counts[("lines", "header_lines")]
+    return counts.get(("drop", "open_no_closed_date"), 0) / data_lines
+
+
 def section_dataset(inputs: Inputs) -> list[str]:
     """Write the section about the data, the windows, and the dropped rows."""
     manifest = inputs.manifest
     counts = row_counts(inputs)
-    data_lines = counts[("lines", "lines_read")] - counts[("lines", "header_lines")]
     rejected = sum(rows for (kind, _), rows in counts.items() if kind == "reject")
     drops = {name: rows for (kind, name), rows in counts.items() if kind == "drop"}
     clean = counts[("clean", "clean_rows")]
@@ -137,9 +143,8 @@ def section_dataset(inputs: Inputs) -> list[str]:
                      count(counts[("window", window)]), profile])
     for name in sorted(drops):
         rows.append([f"Rows dropped: {name}", count(drops[name]), profile])
-    open_share = drops.get("open_no_closed_date", 0) / data_lines
     label = "Share of open requests (no closed date)"
-    rows.append([label, percent(open_share, 2), profile])
+    rows.append([label, percent(open_share(inputs), 2), profile])
     return [
         "## Dataset",
         "",
@@ -346,9 +351,104 @@ def section_slowness(inputs: Inputs) -> list[str]:
     return lines + [owner_sentence(owners)]
 
 
+MODEL_NAMES = {
+    "majority": "the majority class",
+    "history_rule": "the history rule",
+    "logistic_regression": "Logistic Regression",
+    "random_forest": "the Random Forest",
+    "random_forest_no_history": "the Random Forest without history features",
+}
+TABLE_NAMES = {
+    "majority": "Majority class",
+    "history_rule": "History rule",
+    "logistic_regression": "Logistic Regression",
+    "random_forest": "Random Forest",
+    "random_forest_no_history": "Random Forest without history",
+}
+COMPARED = (("f1", "F1"), ("auc_roc", "AUC ROC"), ("auc_pr", "AUC PR"))
+BASELINES = ("majority", "history_rule", "logistic_regression")
+EQUAL_TOLERANCE = 0.0005
+
+
+def compare(value: float, other: float) -> str:
+    """Return better, equal, or worse for a value against another value."""
+    if abs(value - other) <= EQUAL_TOLERANCE:
+        return "equal"
+    return "better" if value > other else "worse"
+
+
+def comparison_lines(models: pd.DataFrame) -> list[str]:
+    """Write one sentence for each metric and each baseline of the Random Forest."""
+    forest = models.loc["random_forest"]
+    lines = []
+    for baseline in BASELINES:
+        for column, label in COMPARED:
+            other = models.loc[baseline, column]
+            word = compare(forest[column], other)
+            tail = "to" if word == "equal" else "than"
+            lines.append(
+                f"- On {label}, the Random Forest is {word} {tail} "
+                f"{MODEL_NAMES[baseline]} ({forest[column]:.3f} against {other:.3f})."
+            )
+    return lines
+
+
+def section_models(inputs: Inputs) -> list[str]:
+    """Write the model metrics and the comparison of the Random Forest."""
+    models = inputs.tables["metrics_by_model.csv"].set_index("model")
+    rows = [[TABLE_NAMES[name]] + [f"{row[column]:.3f}" for column in (
+        "accuracy", "precision", "recall", "f1", "auc_roc", "auc_pr")]
+        for name, row in models.iterrows()]
+    best = models["f1"].idxmax()
+    without = models.loc["random_forest_no_history", "f1"]
+    forest = models.loc["random_forest", "f1"]
+    return [
+        "## Model results",
+        "",
+        "Metrics of the slow class on the test window at the threshold 0.5. "
+        f"Source: {source('metrics_by_model.csv')}.",
+        "",
+    ] + table(["Model", "Accuracy", "Precision", "Recall", "F1", "AUC ROC", "AUC PR"],
+              rows) + [
+        "",
+        f"The model with the highest F1 is {MODEL_NAMES[best]} "
+        f"({models.loc[best, 'f1']:.3f}).",
+        "",
+        "The Random Forest against each baseline:",
+        "",
+    ] + comparison_lines(models) + [
+        "",
+        f"Without the history features, the F1 of the Random Forest is {without:.3f}. "
+        f"With them it is {forest:.3f}.",
+    ]
+
+
+def section_limits(inputs: Inputs) -> list[str]:
+    """Write the section about the limits of the results."""
+    models = inputs.tables["metrics_by_model.csv"].set_index("model")
+    precision = models["precision"]
+    return [
+        "## Limits",
+        "",
+        f"- Open requests are left out. They are {percent(open_share(inputs), 2)} "
+        "of the requests. This favors fast closures.",
+        f"- The data covers {inputs.manifest['year']}. "
+        "The test window is the last quarter.",
+        "- A closed request is not always a fixed problem.",
+        "- N is the same for all problem types. "
+        "Agencies have different service targets.",
+        "- The class weights make precision lower at the threshold 0.5. "
+        f"The precision of the Random Forest is {precision['random_forest']:.3f}. "
+        f"The precision of the history rule is {precision['history_rule']:.3f}.",
+        "",
+        f"Source of the precision values: {source('metrics_by_model.csv')}.",
+    ]
+
+
 Section = Callable[[Inputs], list[str]]
 SECTIONS: list[Section] = [
     section_dataset, section_target, section_spark, section_slowness,
+    section_models, section_limits,
 ]
 
 
